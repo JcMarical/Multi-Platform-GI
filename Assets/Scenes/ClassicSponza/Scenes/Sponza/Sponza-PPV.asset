@@ -102,3 +102,53 @@ MonoBehaviour:
   components:
   - {fileID: -3055112653458443235}
   - {fileID: -6139513381459318461}
+  - {fileID: 2549437880115791076}
+--- !u!114 &2549437880115791076
+MonoBehaviour:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2188e93cc304dc247a3f93cfc052b834, type: 3}
+  m_Name: DDGIComponent
+  m_EditorClassIdentifier: 
+  active: 1
+  enableProbeVariability:
+    m_OverrideState: 0
+    m_Value: 0
+  probeVariabilityThreshold:
+    m_OverrideState: 0
+    m_Value: 0.025
+  useCustomBounds:
+    m_OverrideState: 0
+    m_Value: 0
+  probeCountX:
+    m_OverrideState: 0
+    m_Value: 22
+  probeCountY:
+    m_OverrideState: 0
+    m_Value: 22
+  probeCountZ:
+    m_OverrideState: 0
+    m_Value: 22
+  raysPerProbe:
+    m_OverrideState: 0
+    m_Value: 144
+  debugProbe:
+    m_OverrideState: 1
+    m_Value: 1
+  probeDebugMode:
+    m_OverrideState: 1
+    m_Value: 0
+  probeRadius:
+    m_OverrideState: 1
+    m_Value: 7.52
+  debugIndirect:
+    m_OverrideState: 0
+    m_Value: 0
+  indirectDebugMode:
+    m_OverrideState: 0
+    m_Value: 0
