@@ -21,6 +21,7 @@ Shader "Custom/DDGIVisualize"
 
             #pragma multi_compile _ DDGI_DEBUG_IRRADIANCE DDGI_DEBUG_DISTANCE  DDGI_DEBUG_OFFSET
 
+            //#pragma enable_d3d12_debug_symbols
             #define DDGI_VISUALIZATION 1
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
@@ -28,8 +29,9 @@ Shader "Custom/DDGIVisualize"
             
             //引用DDGI库函数
             #include "Lib/DDGIInputs.hlsl"
-            #include "Lib/DDGIFuncs.hlsl"
             #include "Lib/DDGIProbeIndexing.hlsl"
+            #include "Lib/DDGIFuncs.hlsl"
+
 
             float4x4 _ddgiSphere_Object2World;
 
@@ -56,6 +58,8 @@ Shader "Custom/DDGIVisualize"
                 //根据id获取探针的相对世界坐标，并加在世界坐标上
                 uint probeIndex = input.instanceID;
                 float3 probePosition = DDGIGetProbeWorldPosition(probeIndex);
+                
+                
                 worldPos += probePosition;
 
                 output.positionCS = TransformWorldToHClip(worldPos);
@@ -77,19 +81,19 @@ Shader "Custom/DDGIVisualize"
                 //if(probeState == DDGI_PROBE_STATE_INACTIVE) clip(-1);
 
                 #ifdef DDGI_DEBUG_IRRADIANCE
-		            float4 result   = float4(1f,0f,0f,0f);
+		            float4 result   = float4(1.0f,0,0,0);
                 #elif DDGI_DEBUG_DISTANCE
-		            float4 result   = float4(0f,1f,0f,0f);
+		            float4 result   = float4(0,1.0f,0,0);
                 #elif DDGI_DEBUG_OFFSET
-		            float4 result   = float4(1f,1f,0f,0f);
+		            float4 result   = float4(1.0f,1.0f,0,0);
                 #else
                     //或许需要更多测试模式？
                     float4 result = float4(0,0,1,0);
                 #endif
 
 
-                return result;
-
+                //return result;
+                return  float4(input.positionCS);
             }
             
             ENDHLSL

@@ -1,7 +1,7 @@
 #ifndef DDGI_INPUTS
 #define DDGI_INPUTS
 
-#define DDGI_2Pi 6.2831853071795864f;  // 2 * PI
+#define DDGI_2PI 6.2831853071795864f;  // 2 * PI
 
 
 //----------------------------DDGI探针参数----------------------------
@@ -73,13 +73,40 @@ StructuredBuffer<DirectionalLight> DirectionalLightBuffer;
 //点光源
 struct PunctualLight
 {
-    float3 position;
+    float4 position;
     float4 color;
     float4 distanceAndSpotAttenuation;
     float4 spotDirection;
 };
 
 StructuredBuffer<PunctualLight> PunctualLightBuffer;
+
+struct DDGIPayload
+{
+    // For recursive shadow ray tracing.
+    //// 用于递归阴影光线追踪的标志
+    bool isShadowPayload;   //是否为阴影负载
+    bool isInShadow;        //是否在阴影中
+
+    // Ray tracing api data.
+    // 光线追踪API数据
+    float	distance;           // 光线与交点之间的距离
+    uint	hitKind;            // 交点的类型（例如，是否为物体、光源等）
+    float3	worldRayDirection;  // 光线在世界空间中的方向
+
+    // 光线未命中（天空采样）
+    bool	isMissed;   //表示光线未命中任何物体
+    float3	skySample;
+
+    // 交点几何体和BRDF数据
+    float3 worldPos;
+    float3 worldNormal;
+    float3 albedo;
+    float3 emission;
+};
+
+
+
 
 CBUFFER_START(DDGIVolumeGpu)
     float4   _ProbeRotation;           // 探针旋转四元数，用于旋转探针的采样方向
@@ -113,5 +140,11 @@ CBUFFER_START(DDGIVolumeGpu)
     float    _SkyboxExposure;          // 天空盒曝光值
     float    _Pad0;                    // 填充变量，用于对齐内存（无实际作用）
 CBUFFER_END
+
+//天空盒纹理
+TEXTURECUBE(_SkyboxCubemap); SAMPLER(sampler_SkyboxCubemap);
+
+//
+uint3 _ReductionInputSize;
 
 #endif

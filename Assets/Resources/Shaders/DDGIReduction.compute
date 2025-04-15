@@ -1,0 +1,341 @@
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+#include "Lib/DDGIInputs.hlsl"
+#include "Lib/DDGIProbeIndexing.hlsl"
+#include "Lib/DDGIFuncs.hlsl"
+
+// Reference:   https://www.cnblogs.com/OneStargazer/p/18122953
+//              https://zhuanlan.zhihu.com/p/469436345
+// 目前Unity没有提供查询当前平台Lane Count的API，按HDRP的定义方式，我们在非主机平台上应该回退到64 lane count
+// 对于NVIDIA的显卡来说，lane count是32；而AMD是64，目前尚不清楚HDRP为什么要回退到64
+
+// **但是**，我们这里需要用lane count来计算有多少组wave（NUM_WAVES），进而确定ThreadGroupSum的大小
+// ThreadGroupSum用于存储每一个wave的规约结果，最后由reduceSharedMemorySum函数将ThreadGroupSum二次求和来确定每个线程组的最终规约结果
+// 如果我们在这里将lane count回退到64，那么在NVIDIA显卡上，ThreadGroupSum的大小会不够用，并且还会导致数组越界，其行为不可控制
+// 具体来说，从variability average的回读结果来看，如果lane count = 64，在NVIDIA显卡上我们会得到NaN值
+// ---------------------------------------------------------------------------------------------------
+// 我们这里给到32，如果是AMD的显卡，那么waveIndex只有0和1，相当于ThreadGroupSum有两个空位，这样理论上MaxSumEntry最多就是1
+// 后续也不会访问到ThreadGroupSum的2和3号元素，应该不会有问题；但如果有的显卡（比如Intel）的lane count比32更少，可能还是跑不对
+
+#ifdef PLATFORM_LANE_COUNT                                  // Reference HDRP: We can infer the size of a wave. This is currently not possible on non-consoles, so we have to fallback to a sensible default in those cases.
+    #define RTXGI_DDGI_WAVE_LANE_COUNT  PLATFORM_LANE_COUNT
+#else
+    #define RTXGI_DDGI_WAVE_LANE_COUNT  32                  // HDRP在这里回退到64，然而根据上述推断，我们只能给到32
+#endif
+
+
+#define NUM_THREADS_X 4
+#define NUM_THREADS_Y 8
+#define NUM_THREADS_Z 4
+#define NUM_THREADS NUM_THREADS_X * NUM_THREADS_Y * NUM_THREADS_Z
+#define NUM_WAVES   NUM_THREADS / RTXGI_DDGI_WAVE_LANE_COUNT    //线程组数
+
+//定义两个CS核
+#pragma kernel DDGIReductionCS
+#pragma kernel DDGIExtraReductionCS
+
+// 添加这一行是为了让Wave操作函数（如WaveActiveSum）能够通过编译
+#pragma use_dxc
+
+//探针可变性
+RWTexture2DArray<float>  _ProbeVariability; //变化率纹理数组
+RWTexture2DArray<float2> _ProbeVariabilityAverage;  //变化率2D纹理数组
+
+// 线程组共享内存变量
+// 通过共享内存减少全局内存访问，提升并行效率
+groupshared float ThreadGroupSum[NUM_WAVES];    // 线程组共享内存中的数组，用于存储每个线程组的归约结果
+groupshared uint  MaxSumEntry;                  // 最大归约索引入口
+groupshared uint  NumTotalSamples;              // 总样本数
+
+//计算着色器中常用的规约算法，用于将大量数据高效地规约为一个值。
+//计算所有共享内存线程组的相加，索引0最后应该拥有整个数组的总和
+void reduceSharedMemorySum(uint ThreadIndexInGroup, uint waveIndex, uint waveLaneCount)
+{
+    uint numSharedMemoryEntries = MaxSumEntry + 1;  //当前线程 == 最大共享数量+1
+    uint activeThreads = numSharedMemoryEntries;    //活跃线程总数
+    //如果活跃线程 > 1
+    while(activeThreads > 1)
+    {
+        // 判断当前在线程组的线程，是否小于活跃线程总数，是的话则useful
+        bool usefulThread = ThreadIndexInGroup < activeThreads;
+
+        // 
+        if (usefulThread)
+        {
+            float value = ThreadGroupSum[ThreadIndexInGroup];//读数据
+
+            //加个写锁
+            GroupMemoryBarrierWithGroupSync();
+
+                float warpTotalValue = WaveActiveSum(value);
+
+                //仅针对当前波中具有最小索引的活动通道返回 true。
+                if (WaveIsFirstLane())
+                {
+                    ThreadGroupSum[waveIndex] = warpTotalValue; 
+                }
+            
+            GroupMemoryBarrierWithGroupSync();
+        }
+
+        // Divide by wave size, rounding up (ceil)
+        // 通过wave大小进行分割，进一法填满
+        activeThreads = (activeThreads + waveLaneCount - 1) / waveLaneCount;
+    }
+}
+
+
+
+// Thread Group Counts:
+//  X - (probeCount.x * interiorIrradianceTexels) / (NUM_THREAD_X * ThreadSampleFootprint.x)
+//  Y - (probeCount.y * interiorIrradianceTexels) / (NUM_THREAD_Y * ThreadSampleFootprint.y)
+//  Z - (probeCount.z * interiorIrradianceTexels) / NUM_THREAD_Z
+// 即“在X方向上有NUM_THREAD_X个线程，每个线程有ThreadSampleFootprint.x个采样足迹的设置下，需要在X方向上分配多少个线程组，才能将irradiance texture的X轴规约完毕”
+[numthreads(NUM_THREADS_X, NUM_THREADS_Y, NUM_THREADS_Z)]
+//线程组ID，线程组内线程ID，所有的线程组内线程索引
+void DDGIReductionCS(uint3 GroupID: SV_GroupID, uint3 GroupThreadID: SV_GroupThreadID,uint ThreadIndexInGroup : SV_GroupIndex)
+{
+    // 初始化线程组共享变量
+    // 只有所有线程组中的第一个线程执行初始化
+    if(ThreadIndexInGroup == 0)
+    {
+        MaxSumEntry = 0;
+        NumTotalSamples = 0;
+    }
+    // 确保所有线程同步
+    GroupMemoryBarrierWithGroupSync();
+
+
+    // Doing 4x2 samples per thread每帧4x2个采样
+    const uint3 ThreadSampleFootprint = uint3(4, 2, 1); 
+
+    //计算线程组总采样的偏移量
+    uint3 groupCoordOffset = GroupID.xyz * uint3(NUM_THREADS_X,NUM_THREADS_Y,NUM_THREADS_Z)*ThreadSampleFootprint;
+    uint3 threadCoordInGroup = GroupThreadID.xyz;//组内坐标
+    //计算出当前线程的采样线程坐标
+    uint3 threadCoordGlobal = groupCoordOffset + threadCoordInGroup & ThreadSampleFootprint;
+
+
+    uint waveLaneCount       = WaveGetLaneCount();  // 当前GPU架构的波面宽度（如AMD 64，NVIDIA 32）la
+    uint waveIndex           = ThreadIndexInGroup / waveLaneCount;  // 当前线程所属波面索引
+
+    
+    //探针规约纹理输入尺寸（不确定）？
+    uint3 probeVariabilitySize = _ReductionInputSize;   //规约输入的纹理大小？？？即探针变化率纹理大小？
+
+    //-------------------采样过程-----------------------
+    float sampleSum = 0;
+    uint numSamples = 0;
+
+    //遍历线程组
+    for(uint i = 0; i < ThreadSampleFootprint.x;i++)
+    {
+        for(uint j = 0; j < ThreadSampleFootprint.y;j++)
+        {
+            //计算出采样的坐标
+            uint3 sampleCoord = threadCoordGlobal + uint3(i,j,0);
+
+            //迭代辐照纹理的非边界样本
+            //调用GetProbeIndex与NUM_INTERIOR_TEXELS（而不是NUM_TEXELS）使
+            //样本坐标与探针索引对齐，避免采样边界纹理
+            
+            //根据采样坐标拿到DDGI的Probe索引
+            int probeIndex  = DDGIGetProbeIndex(sampleCoord);
+            
+            //检查采样坐标是否在纹理范围内
+            //all()函数确保x,y,z三个坐标都小于对应的尺寸
+            //防止越界访问纹理数据
+            bool sampleInBounds =  all(sampleCoord  < probeVariabilitySize);
+
+            if(sampleInBounds)
+            {
+                //拿到当前采样坐标变化率的值
+                float value =  _ProbeVariability[sampleCoord].r;
+                
+                //如果Probe分类打开，跳过非活跃 probes
+                if(DDGI_PROBE_CLASSIFICATION == DDGI_PROBE_CLASSIFICATION_ON)
+                {
+                    //找到对应Probe坐标和State，如果不活跃值就设为0
+                    const uint3 probeDataCoords = DDGIGetProbeTexelCoordsOneByOne(probeIndex);
+                    const int probeState = DDGILoadProbeState(probeDataCoords);
+                    if(probeState == DDGI_PROBE_STATE_INACTIVE)
+                    {
+                        value = 0.0f;
+                        continue;
+                    }
+                }
+
+                //采样总和+value，采样总数+1；
+                sampleSum += value;
+                numSamples++;
+            }
+
+        }
+    }
+
+    //拿到一个Wave（线程组）的值和有用的数量
+    // Sum up the warp
+    float waveTotalValue    = WaveActiveSum(sampleSum);
+    // Sum up useful sample count
+    uint  usefulSampleCount = WaveActiveSum(numSamples);
+
+    // Write sum and sample count for this wave
+    // （如果是线程组第一个数据）Wave总值结果写入（共享线程）
+    // 使用 *原子操作* 更新最大Wave索引和添加总样本数
+    if (WaveIsFirstLane())
+    {
+        ThreadGroupSum[waveIndex] = waveTotalValue;
+        InterlockedMax(MaxSumEntry, waveIndex);
+        InterlockedAdd(NumTotalSamples, usefulSampleCount);
+    }
+
+    //线程同步
+    GroupMemoryBarrierWithGroupSync();
+    //对变化率采样进行规约
+    reduceSharedMemorySum(ThreadIndexInGroup, waveIndex, waveLaneCount);//调用reduce函数计算线程组的总和
+    
+    //如果是第一个参数（即总数）
+    if (ThreadIndexInGroup == 0)
+    {
+        //总共采样的可能性
+        float TotalPossibleSamples = NUM_THREADS * ThreadSampleFootprint.x * ThreadSampleFootprint.y;
+        // Average value for the samples we took
+        //计算平均值：记录 活跃线程规约结果/线程总数（0~1）
+        _ProbeVariabilityAverage[GroupID.xyz].r = NumTotalSamples > 0 ? ThreadGroupSum[0] / NumTotalSamples : 0;
+        // Normalizing "weight" factor for this thread group,
+        // to allow partial thread groups to average properly with full groups
+        //计算该线程组的最终权重
+        _ProbeVariabilityAverage[GroupID.xyz].g = NumTotalSamples / TotalPossibleSamples;
+    }
+        
+}
+
+
+//---------共享内存-----------
+groupshared float ThreadGroupAverage[NUM_WAVES];    //存储各Wave的加权平均值
+groupshared uint  MaxAverageEntry;                  //记录最大索引（原子操作）
+groupshared float ThreadGroupWeight[NUM_WAVES];     //存储各Wave权重总和
+
+
+//主要功能
+//1.通过循环逐步合并数据，直到剩余单个结果
+//2.利用WaveActiveSum实现SIMD的WAVE（每个线程都取值计算）快速求和
+//3.计算加权平均值waveTotalValue / waveTotalWeight
+//4.计算权重占比，当前线程组权值/总共权值
+//5.GroupMemoryBarrierWithGroupSync确保内存可见性
+//优化点：利用Wave并行特性减少同步次数
+
+void reduceSharedMemoryAverage(uint ThreadIndexInGroup, uint waveIndex, uint waveLaneCount)
+{
+    uint numSharedMemoryEntries = MaxAverageEntry + 1;
+    uint activeThreads = numSharedMemoryEntries;
+    while (activeThreads > 1)
+    {
+        bool usefulThread = ThreadIndexInGroup < activeThreads;
+        if (usefulThread)
+        {
+            float value = ThreadGroupAverage[ThreadIndexInGroup];
+            float weight = ThreadGroupWeight[ThreadIndexInGroup];
+            GroupMemoryBarrierWithGroupSync();
+
+            float waveTotalValue = WaveActiveSum(weight*value);
+            float waveTotalWeight = WaveActiveSum(weight);
+            float TotalPossibleWeight = WaveActiveCountBits(true);
+
+            if (WaveIsFirstLane())
+            {
+                ThreadGroupAverage[waveIndex] = waveTotalValue / waveTotalWeight;
+                ThreadGroupWeight[waveIndex] = waveTotalWeight / TotalPossibleWeight;
+            }
+            GroupMemoryBarrierWithGroupSync();
+        }
+        activeThreads = (activeThreads + waveLaneCount - 1) / waveLaneCount;
+    }
+}
+
+
+//该着色器典型应用于全局光照探针数据聚合、HDR环境光遮蔽计算等需要大规模加权平均的场景
+[numthreads(NUM_THREADS_X, NUM_THREADS_Y, NUM_THREADS_Z)]
+void DDGIExtraReductionCS(uint3 GroupID : SV_GroupID, uint3 GroupThreadID : SV_GroupThreadID, uint ThreadIndexInGroup : SV_GroupIndex)
+{
+    // 初始化共享内存计数器（仅首个线程执行）[6](@ref)
+    if (ThreadIndexInGroup == 0)
+    {
+        MaxAverageEntry = 0; // 最大有效Wave索引初始化
+    }
+    GroupMemoryBarrierWithGroupSync(); // 确保共享内存写入对其他线程可见[3](@ref)
+
+    // 波面Wave参数计算
+    uint waveLaneCount = WaveGetLaneCount();  // 当前GPU架构的波面宽度（如AMD 64，NVIDIA 32）
+
+    uint waveIndex = ThreadIndexInGroup / waveLaneCount;    // 当前线程所属波面索引
+
+    // Doing 4x2 samples per thread
+    const uint3 ThreadSampleFootprint = uint3(4, 2, 1);
+    
+    // 计算全局采样坐标
+    uint3 groupCoordOffset = GroupID.xyz * uint3(NUM_THREADS_X, NUM_THREADS_Y, NUM_THREADS_Z) * ThreadSampleFootprint;
+    uint3 threadCoordInGroup = GroupThreadID.xyz;
+    uint3 threadCoordGlobal = groupCoordOffset + threadCoordInGroup * ThreadSampleFootprint;
+    uint3 inputSize = _ReductionInputSize; // 输入数据的全局尺寸
+
+    // 边界检测：当前线程处理的4x2块是否在有效范围内
+    bool footprintInBounds = all(threadCoordGlobal < inputSize);
+    float threadFootprintValueSum = 0;  // 线程局部加权值累加器
+    float threadFootprintWeightSum = 0; // 线程局部权重累加器
+
+    // 执行4x2像素块采样（优化显存访问模式）[6](@ref)
+    if (footprintInBounds)
+    {
+        for (uint i = 0; i < ThreadSampleFootprint.x; i++) // 横向4像素
+        {
+            for (uint j = 0; j < ThreadSampleFootprint.y; j++) // 纵向2像素
+            {
+                uint3 sampleCoord = threadCoordGlobal + uint3(i, j, 0);
+                bool sampleInBounds = all(sampleCoord < inputSize);
+                if (sampleInBounds) // 逐像素边界检查
+                {
+                    // 从输入缓冲区读取值（.r）和权重（.g）
+                    float value = _ProbeVariabilityAverage[sampleCoord].r;
+                    float weight = _ProbeVariabilityAverage[sampleCoord].g;
+                    threadFootprintValueSum += weight * value; // 加权值累加
+                    threadFootprintWeightSum += weight;        // 权重累加
+                }
+            }
+        }
+    }
+
+    // 计算线程局部加权平均（考虑部分采样无效的情况）
+    float threadAverageValue = (footprintInBounds && threadFootprintWeightSum > 0) 
+        ? threadFootprintValueSum / threadFootprintWeightSum 
+        : 0;
+
+    // 归一化线程权重（完整4x2采样则权重1.0，部分采样按比例衰减）[7](@ref)
+    float ThreadTotalPossibleWeight = ThreadSampleFootprint.x * ThreadSampleFootprint.y;
+    float threadWeight = threadFootprintWeightSum / ThreadTotalPossibleWeight;
+
+    // 波面级并行归约（SIMD加速）[3](@ref)
+    float waveTotalValue = WaveActiveSum(threadWeight * threadAverageValue); // 加权值总和
+    float waveTotalWeight = WaveActiveSum(threadWeight);                     // 权重总和
+    float waveTotalPossibleWeight = waveLaneCount * ThreadTotalPossibleWeight;
+
+    // 仅波面首线程存储中间结果到共享内存
+    if (WaveIsFirstLane() && WaveActiveAnyTrue(footprintInBounds))
+    {
+        ThreadGroupAverage[waveIndex] = waveTotalValue / waveTotalWeight;     // 波面平均
+        ThreadGroupWeight[waveIndex] = waveTotalWeight / waveTotalPossibleWeight; // 归一化权重
+        InterlockedMax(MaxSumEntry, waveIndex); // 原子操作更新最大有效波面索引[3](@ref)
+    }
+
+    GroupMemoryBarrierWithGroupSync(); // 同步共享内存访问
+
+    // 执行共享内存的多级归约（将各波面结果合并为单值）
+    reduceSharedMemoryAverage(ThreadIndexInGroup, waveIndex, waveLaneCount);
+
+    // 线程组首线程写入最终结果到全局缓冲区
+    if (ThreadIndexInGroup == 0)
+    {
+        _ProbeVariabilityAverage[GroupID.xyz].r = ThreadGroupAverage[0]; // 全局平均值
+        _ProbeVariabilityAverage[GroupID.xyz].g = ThreadGroupWeight[0];   // 全局总权重
+    }
+}
