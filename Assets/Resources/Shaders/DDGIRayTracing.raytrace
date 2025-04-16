@@ -12,6 +12,7 @@
 #include "Lib/DDGIInputs.hlsl"
 #include "Lib/DDGIProbeIndexing.hlsl"
 #include "Lib/DDGIFuncs.hlsl"
+
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/UnityInput.hlsl"
 
 
@@ -46,6 +47,8 @@ void DDGI_RayGen()
     rayDesc.TMin        = 0.0f;
     rayDesc.TMax        = FLT_MAX;          //光线的最大距离（FLT_MAX来源于）
     
+    //-----------------主要追踪过程 Primary Tracing.-------------------
+
     DDGIPayload primaryPayload = GetPrimaryPayload();  // 获取光线追踪的负载数据
     
     //https://learn.microsoft.com/zh-cn/windows/win32/direct3d12/traceray-function DX12的函数

@@ -16,8 +16,8 @@ void DDGIResetRelocation (uint3 DispatchThreadID : SV_DispatchThreadID)
     _ProbeData[outputCoords] = float4(0.0f,0.0f,0.0f,1.0f);
 }
 // 探针重定位数据的计算着色器
-[numsthreads(32,1,1)]
-void DDGIResetRelocation (uint3 DispatchThreadID : SV_DispatchThreadID)
+[numthreads(32,1,1)]
+void DDGIRelocateProbe (uint3 DispatchThreadID : SV_DispatchThreadID)
 {
     const uint probeIndex = DispatchThreadID.x;//当前线程id在整个线程组的id即probeid。
 
@@ -84,62 +84,64 @@ void DDGIResetRelocation (uint3 DispatchThreadID : SV_DispatchThreadID)
                 farthestFrontfaceIndex = rayIndex;
             }
         }
-
-        //初始偏移量为极大值
-        float3 fullOffset = float3(1e27f,1e27f,1e27f);
-        // 处理三种情况：
-        //如果最近背面光线检测存在 并且 占比超过背面固定光的阈值
-        if(closestBackfaceIndex != -1 && ((float)backfaceCount/numRays) > _ProbeFixedRayBackfaceThreshold)
-        {
-            // 情况1：如果探针在几何体内部
-            
-            //拿到根据id和斐波那契螺旋生成的光线方向（固定直接返回，普通加随机旋转）
-            float3 closestBackfaceDirection = DDGIGetProbeRayDirection(closestBackfaceDistance);
-            // 将探针移动到几何体外部（当前偏移+（最近背面距离+最小探针正面距离的一半））
-            fullOffset = offset + (closestBackfaceDirection * (closestBackfaceDistance + _ProbeMinFrontfaceDistance * 0.5f));
-        }
-        //那么如果最近前面的距离 小于 探针最小前面的距离
-        
-        else if(closestFrontfaceDistance < _ProbeMinFrontfaceDistance)
-        {
-            // 情况2：如果探针太靠近正面
-            
-            //拿到最近表面和最远前面表面的方向
-            float3 closestFrontfaceDirection = DDGIGetProbeRayDirection(closestFrontfaceIndex);
-            float3 farthestFrontfaceDirection = DDGIGetProbeRayDirection(farthestFrontfaceIndex);
-
-
-            // 只有当最近正面和最远正面方向相反时才移动
-            if(dot(closestFrontfaceDirection,farthestFrontfaceDirection) <= 0.f)
-            {
-                // 确保探针不会穿过最远正面
-                farthestFrontfaceDirection *= min(farthestFrontfaceDistance,1.f);
-                fullOffset = offset + farthestFrontfaceDirection;
-            }
-            
-        }
-
-        else if(closestFrontfaceDistance > _ProbeMinFrontfaceDistance)
-        {
-            // 情况3：如果探针离得太远
-            // 将探针向原点方向移动
-            float moveBackMargin = min(closestFrontfaceDistance - _ProbeMinFrontfaceDistance, length(offset));
-            float3 moveBackDirection = normalize(-offset);//通过偏移拿到位移的负方向
-            fullOffset = offset + (moveBackMargin * moveBackDirection);  //最终偏移量就是原偏移+移动距离*方向   
-        }
-        
-        // 将偏移量归一化到探针尺寸范围内
-        float3 normalizedOffset = fullOffset / _ProbeSize;
-
-
-        // 如果归一化后的偏移量在合理范围内（即和原来的偏移在0.45的平方内）
-        if (dot(normalizedOffset, normalizedOffset) < 0.2025f)
-        {
-            // 更新探针的偏移量
-            offset = fullOffset;
-        }
-
-        //以探针体积形式存储偏移
-        DDGIStoreProbeDataOffset(outputCoords,offset);
     }
+
+    //初始偏移量为极大值
+    float3 fullOffset = float3(1e27f,1e27f,1e27f);
+    // 处理三种情况：
+    //如果最近背面光线检测存在 并且 占比超过背面固定光的阈值
+    if(closestBackfaceIndex != -1 && ((float)backfaceCount/numRays) > _ProbeFixedRayBackfaceThreshold)
+    {
+        // 情况1：如果探针在几何体内部
+            
+        //拿到根据id和斐波那契螺旋生成的光线方向（固定直接返回，普通加随机旋转）
+        float3 closestBackfaceDirection = DDGIGetProbeRayDirection(closestBackfaceDistance);
+        // 将探针移动到几何体外部（当前偏移+（最近背面距离+最小探针正面距离的一半））
+        fullOffset = offset + (closestBackfaceDirection * (closestBackfaceDistance + _ProbeMinFrontfaceDistance * 0.5f));
+    }
+    //那么如果最近前面的距离 小于 探针最小前面的距离
+        
+    else if(closestFrontfaceDistance < _ProbeMinFrontfaceDistance)
+    {
+        // 情况2：如果探针太靠近正面
+            
+        //拿到最近表面和最远前面表面的方向
+        float3 closestFrontfaceDirection = DDGIGetProbeRayDirection(closestFrontfaceIndex);
+        float3 farthestFrontfaceDirection = DDGIGetProbeRayDirection(farthestFrontfaceIndex);
+
+
+        // 只有当最近正面和最远正面方向相反时才移动
+        if(dot(closestFrontfaceDirection,farthestFrontfaceDirection) <= 0.f)
+        {
+            // 确保探针不会穿过最远正面
+            farthestFrontfaceDirection *= min(farthestFrontfaceDistance,1.f);
+            fullOffset = offset + farthestFrontfaceDirection;
+        }
+            
+    }
+
+    else if(closestFrontfaceDistance > _ProbeMinFrontfaceDistance)
+    {
+        // 情况3：如果探针离得太远
+        // 将探针向原点方向移动
+        float moveBackMargin = min(closestFrontfaceDistance - _ProbeMinFrontfaceDistance, length(offset));
+        float3 moveBackDirection = normalize(-offset);//通过偏移拿到位移的负方向
+        fullOffset = offset + (moveBackMargin * moveBackDirection);  //最终偏移量就是原偏移+移动距离*方向   
+    }
+
+
+    
+    // 将偏移量归一化到探针尺寸范围内
+    float3 normalizedOffset = fullOffset / _ProbeSize;
+
+
+    // 如果归一化后的偏移量在合理范围内（即和原来的偏移在0.45的平方内）
+    if (dot(normalizedOffset, normalizedOffset) < 0.2025f)
+    {
+        // 更新探针的偏移量
+        offset = fullOffset;
+    }
+
+    //以探针体积形式存储偏移
+    DDGIStoreProbeDataOffset(outputCoords,offset);
 }

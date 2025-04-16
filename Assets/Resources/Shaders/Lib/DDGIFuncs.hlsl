@@ -120,21 +120,21 @@ Light GetDDGIPunctualLight(int index, float3 positionWS)
 //------------------------------------------------------------------------
 
 #if defined(DDGI_VISUALIZATION) || defined(DDGI_RAYTRACING) || defined(FORWARD_USE_DDGI)
-float3 DDGILoadProbeDataOffset(uint3 coords)
-	{
-		return LOAD_TEXTURE2D_ARRAY_LOD(_ProbeData, coords.xy, coords.z, 0).xyz * _ProbeSize;	
-	}
-
-int DDGILoadProbeState(uint3 coords)
-	{
-		int state = DDGI_PROBE_STATE_ACTIVE;
-		if(DDGI_PROBE_CLASSIFICATION == DDGI_PROBE_CLASSIFICATION_ON)
+	float3 DDGILoadProbeDataOffset(uint3 coords)
 		{
-			state = (int)LOAD_TEXTURE2D_ARRAY_LOD(_ProbeData, coords.xy, coords.z, 0).a;
-		} 
+			return LOAD_TEXTURE2D_ARRAY_LOD(_ProbeData, coords.xy, coords.z, 0).xyz * _ProbeSize;	
+		}
 
-		return state;
-	}
+	int DDGILoadProbeState(uint3 coords)
+		{
+			int state = DDGI_PROBE_STATE_ACTIVE;
+			if(DDGI_PROBE_CLASSIFICATION == DDGI_PROBE_CLASSIFICATION_ON)
+			{
+				state = (int)LOAD_TEXTURE2D_ARRAY_LOD(_ProbeData, coords.xy, coords.z, 0).a;
+			} 
+
+			return state;
+		}
 #else
 // We use Texture2DArray in visualization, Texture2DArray dont support these function.
 float3 DDGILoadProbeDataOffset(uint3 coords)

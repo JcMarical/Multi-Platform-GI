@@ -1,4 +1,4 @@
-Shader "Custom/LitRaytracing"
+Shader "Custom/LitRayTracing"
 {
     Properties
     {
@@ -114,7 +114,7 @@ Shader "Custom/LitRaytracing"
                 #include "Lib/LitRayTracingInput.hlsl"
 
                 //该指令在光线追踪着色器中起着关键作用，标识了处理光线与物体交点的函数，使得光线追踪引擎能够在相交时调用该函数进行光照计算。
-                [shader("closestHit")]//最近点着色器
+                [shader("closesthit")]//最近点着色器
                 void ClosestHitShader(inout RayPayload rayPayload : SV_RayPayload, AttributeData attributeData : SV_IntersectionAttributes)
                 {
                     IntersectionVertex vertex = (IntersectionVertex)0;//相交点
@@ -164,7 +164,7 @@ Shader "Custom/LitRaytracing"
             TEXTURE2D(_BaseMap); SAMPLER(sampler_BaseMap);
             TEXTURE2D(_BumpMap); SAMPLER(sampler_BumpMap);
 
-            [Shader("closethit")]
+            [Shader("closesthit")]
              void ClosestHitShader(inout DDGIPayload payload : SV_RayPayload, AttributeData attributeData : SV_IntersectionAttributes)
             {
                 //若为阴影负载，直接返回
@@ -359,5 +359,5 @@ Shader "Custom/LitRaytracing"
     
     CustomEditor "LWGUI.LWGUI"
 
-    }
+    
 }

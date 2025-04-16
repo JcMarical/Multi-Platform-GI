@@ -53,9 +53,9 @@ Texture2DArray<float2>   _ProbeDistanceHistory;
 
 //可视化或光线追踪或前向渲染使用DDGI时，使用只读Texture2DArray，否则使用RWTexture2DArray用来读写
 #if defined(DDGI_VISUALIZATION) || defined(DDGI_RAYTRACING) || defined(FORWARD_USE_DDGI)
-	Texture2DArray<float4>   _ProbeData;
-#else
-	RWTexture2DArray<float4> _ProbeData;
+    Texture2DArray<float4>   _ProbeData;
+    #else
+    RWTexture2DArray<float4> _ProbeData;
 #endif
 //----------------------------DDGI探针参数----------------------------
 

@@ -532,6 +532,8 @@ public class DDGIFeature : ScriptableRendererFeature
             int numProbesFlat = mDDGIVolumeCpu.NumProbes.x * mDDGIVolumeCpu.NumProbes.y * mDDGIVolumeCpu.NumProbes.z;
 
             //DDGI Ratrace Pass 执行
+            //主要使用DDGI的Raytrace Shader
+            //设置了四种纹理，两种缓冲。
             using (new ProfilingScope(cmd, new ProfilingSampler("DDGI Ray Trace Pass")))
             {
                 //如果全局光照未收敛
@@ -542,7 +544,6 @@ public class DDGIFeature : ScriptableRendererFeature
                     
                     //  设置光线追踪加速结构
                     cmd.SetRayTracingAccelerationStructure(mDDGIRayTraceShader, GpuParams._AccelerationStructure, mAccelerationStructure);
-                
                     
                     // 启用光线追踪着色器
                     cmd.SetRayTracingShaderPass(mDDGIRayTraceShader, "DDGIRayTracing");
@@ -564,6 +565,171 @@ public class DDGIFeature : ScriptableRendererFeature
                 }
             }
             
+            // 更新 Irradiance
+            // 主要计算Irradiance更新相关的 Compute Shader
+            using (new ProfilingScope(cmd, new ProfilingSampler("DDGI Update Irradiance Pass")))
+            {
+                if (!mIsConverged)
+                {
+                    cmd.SetComputeBufferParam(mUpdateIrradianceCS, mUpdateIrradianceKernel, GpuParams.RayBuffer, mRayBuffer);
+                    cmd.SetComputeTextureParam(mUpdateIrradianceCS, mUpdateIrradianceKernel, GpuParams._ProbeIrradiance, mProbeIrradianceId);
+                    cmd.SetComputeTextureParam(mUpdateIrradianceCS, mUpdateIrradianceKernel, GpuParams._ProbeIrradianceHistory, mProbeIrradianceHistoryId);
+                    cmd.SetComputeTextureParam(mUpdateIrradianceCS, mUpdateIrradianceKernel, GpuParams._ProbeVariability, mProbeVariabilityId);
+
+                    // 注意我们是Y-UP，这里Dispatch需要反转
+                    cmd.DispatchCompute(mUpdateIrradianceCS, mUpdateIrradianceKernel, mDDGIVolumeCpu.NumProbes.x, mDDGIVolumeCpu.NumProbes.z, mDDGIVolumeCpu.NumProbes.y);
+                }
+            }
+            
+            // 更新 探针距离纹理
+            // 主要计算Distance更新相关的 Compute Shader
+            using (new ProfilingScope(cmd, new ProfilingSampler("DDGI Update Distance Pass")))
+            {
+                if (!mIsConverged)
+                {
+                    cmd.SetComputeBufferParam(mUpdateDistanceCS, mUpdateDistanceKernel, GpuParams.RayBuffer, mRayBuffer);
+                    cmd.SetComputeTextureParam(mUpdateDistanceCS, mUpdateDistanceKernel, GpuParams._ProbeDistance, mProbeDistanceId);
+                    cmd.SetComputeTextureParam(mUpdateDistanceCS, mUpdateDistanceKernel, GpuParams._ProbeDistanceHistory, mProbeDistanceHistoryId);
+
+                    // 注意我们是Y-UP，这里Dispatch需要反转
+                    cmd.DispatchCompute(mUpdateDistanceCS, mUpdateDistanceKernel, mDDGIVolumeCpu.NumProbes.x, mDDGIVolumeCpu.NumProbes.z, mDDGIVolumeCpu.NumProbes.y);
+                }
+            }
+            
+            //---------- 探针重定位功能 -----------
+            //执行的也是RelocationComputeShder的功能
+            //区别在于会根据开关 判断重置Kernel还是重定位的 Kernel。
+            if (mddgiOverride.enableProbeRelocation.value)
+            {
+                using (new ProfilingScope(cmd, new ProfilingSampler("DDGI Relocate Probe Pass")))
+                {
+                    var numGroupsX = Mathf.CeilToInt(numProbesFlat / 32.0f /*relocationGroupSizeX*/);
+                    
+                    if (mNeedToResetProbeRelocation)
+                    {
+                        cmd.SetComputeTextureParam(mRelocateProbeCS, mResetRelocationKernel, GpuParams._ProbeData, mProbeDataId);
+                        cmd.DispatchCompute(mRelocateProbeCS, mResetRelocationKernel, numGroupsX, 1, 1);
+                        mNeedToResetProbeRelocation = false;
+                    }
+                    
+                    cmd.SetComputeTextureParam(mRelocateProbeCS, mRelocateProbeKernel, GpuParams._ProbeData, mProbeDataId);
+                    cmd.SetComputeBufferParam(mRelocateProbeCS, mRelocateProbeKernel, GpuParams.RayBuffer, mRayBuffer);
+                    cmd.DispatchCompute(mRelocateProbeCS, mRelocateProbeKernel, numGroupsX, 1, 1);
+                }
+            }
+            else
+            {
+                if (!mNeedToResetProbeRelocation)
+                {
+                    var numGroupsX = Mathf.CeilToInt(numProbesFlat / 32.0f /*relocationGroupSizeX*/);
+                    
+                    cmd.SetComputeTextureParam(mRelocateProbeCS, mResetRelocationKernel, GpuParams._ProbeData, mProbeDataId);
+                    cmd.DispatchCompute(mRelocateProbeCS, mResetRelocationKernel, numGroupsX, 1, 1);
+                    mNeedToResetProbeRelocation = true;
+                }
+            }
+            
+            
+            //----------- 探针分类功能 ------------
+            //依然是CS
+            //根据开关 分类或重置
+            if (mddgiOverride.enableProbeClassification.value)
+            {
+                using (new ProfilingScope(cmd, new ProfilingSampler("DDGI Classify Probe Pass")))
+                {
+                    var numGroupsX = Mathf.CeilToInt(numProbesFlat / 32.0f /*relocationGroupSizeX*/);
+
+                    if (mNeedToResetProbeClassification)
+                    {
+                        cmd.SetComputeTextureParam(mProbeClassificationCS, mResetClassificationKernel, GpuParams._ProbeData, mProbeDataId);
+                        cmd.DispatchCompute(mProbeClassificationCS, mResetClassificationKernel, numGroupsX, 1, 1);
+                        mNeedToResetProbeClassification = false;
+                    }
+                    
+                    cmd.SetComputeTextureParam(mProbeClassificationCS, mProbeClassificationKernel, GpuParams._ProbeData, mProbeDataId);
+                    cmd.SetComputeBufferParam(mProbeClassificationCS, mProbeClassificationKernel, GpuParams.RayBuffer, mRayBuffer);
+                    cmd.DispatchCompute(mProbeClassificationCS, mProbeClassificationKernel, numGroupsX, 1, 1);
+                }
+            }
+            else
+            {
+                if (!mNeedToResetProbeClassification)
+                {
+                    var numGroupsX = Mathf.CeilToInt(numProbesFlat / 32.0f /*relocationGroupSizeX*/);
+                    
+                    cmd.SetComputeTextureParam(mProbeClassificationCS, mResetClassificationKernel, GpuParams._ProbeData, mProbeDataId);
+                    cmd.DispatchCompute(mProbeClassificationCS, mResetClassificationKernel, numGroupsX, 1, 1);
+                    mNeedToResetProbeClassification = true;
+                }
+            }
+            
+            //----------- 探针变异性（光照收敛计算） -------------
+            //emmm: 主要做规约方面的工作，但是没怎么看懂
+            // 大概步骤是 开启设置->设置线程组和纹理->第一步规约-> extra 规约，并且最后还有个异步读值。
+            // 关闭设置 积分永远不会收敛，所以会一直计算。
+            if (mddgiOverride.enableProbeVariability.value)
+            {
+                using (new ProfilingScope(cmd, new ProfilingSampler("DDGI Variability Pass")))
+                {
+                    // TODO: Y-UP Probe Volume硬编码，如果要修改Volume轴向需要做分支
+                    var inputTexels = new Vector3Int(mDDGIVolumeCpu.NumProbes.x * PROBE_NUM_IRRADIANCE_INTERIOR_TEXELS,
+                        mDDGIVolumeCpu.NumProbes.z * PROBE_NUM_IRRADIANCE_INTERIOR_TEXELS,
+                        mDDGIVolumeCpu.NumProbes.y);
+                    var NumThreadsInGroup = new Vector3Int(4, 8, 4);
+                    var ThreadSampleFootprint = new Vector2Int(4, 2);
+                    
+                    // -------------------------
+                    // First Reduction Pass
+                    // -------------------------
+                    {
+                        cmd.SetComputeTextureParam(mProbeReductionCS, mReductionKernel, GpuParams._ProbeVariability, mProbeVariabilityId);
+                        cmd.SetComputeTextureParam(mProbeReductionCS, mReductionKernel, GpuParams._ProbeVariabilityAverage, mProbeVariabilityAverageId);
+                        cmd.SetComputeVectorParam(mProbeReductionCS, GpuParams._ReductionInputSize, new Vector4(inputTexels.x, inputTexels.y, inputTexels.z, 0.0f));
+
+                        var outputTexelsX = Mathf.CeilToInt((float)inputTexels.x / (float)(NumThreadsInGroup.x * ThreadSampleFootprint.x));
+                        var outputTexelsY = Mathf.CeilToInt((float)inputTexels.y / (float)(NumThreadsInGroup.y * ThreadSampleFootprint.y));
+                        var outputTexelsZ = Mathf.CeilToInt((float)inputTexels.z / (float)(NumThreadsInGroup.z));
+                    
+                        cmd.DispatchCompute(mProbeReductionCS, mReductionKernel, outputTexelsX, outputTexelsY, outputTexelsZ);
+
+                        inputTexels = new Vector3Int(outputTexelsX, outputTexelsY, outputTexelsZ);
+                    }
+                    
+                    // -------------------------
+                    // Extra Reduction Pass
+                    // -------------------------
+                    {
+                        while (inputTexels.x > 1 || inputTexels.y > 1 || inputTexels.z > 1)
+                        {
+                            var outputTexelsX = Mathf.CeilToInt((float)inputTexels.x / (float)(NumThreadsInGroup.x * ThreadSampleFootprint.x));
+                            var outputTexelsY = Mathf.CeilToInt((float)inputTexels.y / (float)(NumThreadsInGroup.y * ThreadSampleFootprint.y));
+                            var outputTexelsZ = Mathf.CeilToInt((float)inputTexels.z / (float)(NumThreadsInGroup.z));
+                            
+                            cmd.SetComputeTextureParam(mProbeReductionCS, mExtraReductionKernel, GpuParams._ProbeVariabilityAverage, mProbeVariabilityAverageId);
+                            cmd.SetComputeVectorParam(mProbeReductionCS, GpuParams._ReductionInputSize, new Vector4(inputTexels.x, inputTexels.y, inputTexels.z, 0.0f));
+                            
+                            cmd.DispatchCompute(mProbeReductionCS, mExtraReductionKernel, outputTexelsX, outputTexelsY, outputTexelsZ);
+                            
+                            inputTexels = new Vector3Int(outputTexelsX, outputTexelsY, outputTexelsZ);
+                        }
+                    }
+                    
+                    // ---------------------------------
+                    // Readback From Variability Average
+                    // ---------------------------------
+                    // Grab First Pixel of Variability Average
+                    AsyncGPUReadback.Request(mProbeVariabilityAverage, 0, 0, 1, 0, 1, 0, 1, VariabilityEstimate);
+                }
+            }
+            else
+            {
+                // 如果不开启variability特性，那么我们假定积分过程永远不会收敛
+                mIsConverged = false;
+                mClearProbeVariability = true;
+                mNumVolumeVariabilitySamples = 0u;
+            }
+
+
             
             //历史数据赋值，虽然暂时不知道有啥用。
             cmd.CopyTexture(mProbeIrradianceId, mProbeIrradianceHistoryId);
@@ -592,7 +758,8 @@ public class DDGIFeature : ScriptableRendererFeature
             if (mProbeData != null) { mProbeData.Release(); mProbeData = null; }
             if (mProbeVariability != null) { mProbeVariability.Release(); mProbeVariability = null; }
             if (mProbeVariabilityAverage != null) { mProbeVariabilityAverage.Release(); mProbeVariabilityAverage = null; }
-
+            
+            
             if (mDDGIVolumeGpuCB != null) { mDDGIVolumeGpuCB.Release(); mDDGIVolumeGpuCB = null; }
         }
 
@@ -710,6 +877,23 @@ public class DDGIFeature : ScriptableRendererFeature
                     }
                 }
 
+                     
+                // 如果灯光数组大小为0，就只申请带1个元素的空buffer，创建大小为0的ComputeBuffer会引发错误
+                if(mDirectionalLightBuffer != null) { mDirectionalLightBuffer.Release(); mDirectionalLightBuffer = null; }
+                mDirectionalLightBuffer = new ComputeBuffer(Mathf.Max(gpuDirectionalLights.Count, 1), 2 * 16, ComputeBufferType.Default);
+            
+                if(mPunctualLightBuffer != null) { mPunctualLightBuffer.Release(); mPunctualLightBuffer = null; }
+                mPunctualLightBuffer = new ComputeBuffer(Mathf.Max(gpuPunctualLights.Count, 1), 4 * 16, ComputeBufferType.Default);
+
+                mDirectionalLightBuffer.SetData(gpuDirectionalLights.ToArray());
+                mPunctualLightBuffer.SetData(gpuPunctualLights.ToArray());
+
+                mDDGIVolumeGpu._DirectionalLightCount = gpuDirectionalLights.Count;
+                mDDGIVolumeGpu._PunctualLightCount = gpuPunctualLights.Count;
+                /*cmd.SetGlobalInt(GpuParams._DirectionalLightCount, gpuDirectionalLights.Count);
+                cmd.SetGlobalInt(GpuParams._PunctualLightCount, gpuPunctualLights.Count);*/
+                
+                
                 // -----------------------------
                 // Any Light Changed Determine 任何光线改变
                 // -----------------------------
@@ -869,6 +1053,35 @@ public class DDGIFeature : ScriptableRendererFeature
         
         
         #region 工具函数
+        
+        //变化率估计，异步回读。
+        private void VariabilityEstimate(AsyncGPUReadbackRequest request)
+        {
+            if (request.hasError)
+            {
+                Debug.LogError("DDGI: 回读Variability Average时发生错误！");
+            }
+            else if (request.done)
+            {
+                // 我们的Variability Average使用R32G32_SFLOAT格式，因此CPU端读取float刚好能对应32位
+                // 此时readbackPixels的大小应为2，分别对应R和G通道，我们只取R通道即可
+                var readbackPixels = request.GetData<float>().ToArray();
+                if (readbackPixels.Length > 0)
+                {
+                    var volumeAverageVariability = readbackPixels[0];
+
+                    if (mClearProbeVariability) mNumVolumeVariabilitySamples = 0;
+                    
+                    mIsConverged = (mNumVolumeVariabilitySamples++ > mMinimumVariabilitySamples) &&
+                                   (volumeAverageVariability < mddgiOverride.probeVariabilityThreshold.value);
+                }
+                else
+                {
+                    Debug.LogError("DDGI: 回读Variability Average完成，但意外地返回了空数据，请排查");
+                }
+            }
+        }
+        
         public Vector3Int GetNumProbes() => mDDGIVolumeCpu.NumProbes; // For Visualization Pass
         public RenderTargetIdentifier GetProbeData() => mProbeDataId; // For Visualization Pass
         
@@ -1018,6 +1231,7 @@ public class DDGIFeature : ScriptableRendererFeature
             // Shader Keywords.设置Shader关键则
             // -------------------------------------------------
             cmd.DisableShaderKeyword(GpuParams.DDGI_SHOW_INDIRECT_ONLY);
+            
             cmd.DisableShaderKeyword(GpuParams.DDGI_SHOW_PURE_INDIRECT_RADIANCE);
             if (mddgiOverride.debugIndirect.value)
             {
@@ -1288,9 +1502,8 @@ public class DDGIFeature : ScriptableRendererFeature
     {
         
         base.Dispose(disposing);
-
-        mDDGIPass?.Release();
-        mDDGIVisualizePass?.Release();
+        //mDDGIPass?.Release();
+        //mDDGIVisualizePass?.Release();
 
         #if UNITY_EDITOR
                 EditorSceneManager.sceneOpened -= OnSceneOpened;

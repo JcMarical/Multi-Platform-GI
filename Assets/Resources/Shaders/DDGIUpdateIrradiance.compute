@@ -40,7 +40,8 @@ void DDGIUpdateIrradiance(
     uint  GroupIndex        : SV_GroupIndex)    //当前线程在所属线程组中的线程索引（整数值）
 {
     // 注意这里我们使用的DDGIGetProbeIndex函数接受的输入是Probe的网格坐标，但我们的调度线程组是已经经过反转的，所以需要再次反转回来
-    uint  probeIndex          = DDGIGetProbeIndex(GroupId.xzy);//先x、后z、再y
+    uint  probeIndex          = DDGIGetProbeIndex(GroupId.xzy);//先x、后z、再y（Y轴向上）
+    //用于获取当前Probe的左上角的Texel Coord
     uint3 cornerTexelLocation = DDGIGetProbeBaseTexelCoords(probeIndex, PROBE_IRRADIANCE_TEXELS);
     uint3 baseTexelLocation   = cornerTexelLocation + uint3(1, 1, 0);
     uint3 texelLocation       = baseTexelLocation + uint3(GroupThreadId.xy, 0);
@@ -129,7 +130,7 @@ void DDGIUpdateIrradiance(
     
     //-----------Tone-mapping伽马纠正-------------
     result.rgb = pow(abs(result.rgb), rcp(5.0f));//rcp，倒数
-    float delta = result.rgb - prevRadiance.rgb;
+    float3 delta = result.rgb - prevRadiance.rgb;
     
     // 在时域混合之前缓存当前帧Irradiance评估结果，用于Probe Variability阶段
     float3 irradianceSample = result.rgb;

@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "com.jasonma.lwgui": "https://github.com/JasonMa0012/LWGUI.git",
     "com.unity.collab-proxy": "2.7.1",
     "com.unity.feature.development": "1.0.1",
     "com.unity.render-pipelines.universal": "14.0.9",

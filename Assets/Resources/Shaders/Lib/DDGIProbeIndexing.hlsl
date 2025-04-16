@@ -104,6 +104,7 @@ uint3 DDGIGetProbeTexelCoordsOneByOne(int probeIndex)
     //获取平面索引
     int planeIndex      = int(probeIndex / probesPerPlane);
 
+    //以Y轴向上
 #if 1
     // Left or Right Y-UP
     int x = (probeIndex % _ProbeCount.x);
@@ -121,6 +122,17 @@ uint3 DDGIGetProbeTexelCoordsOneByOne(int probeIndex)
     return uint3(x, y, planeIndex);
 
 }
+
+// 用于获取当前Probe的左上角的Texel Coord，考虑扩张，返回的结果是Border Texel，需要加上uint3(1,1,0)才能正确索引到实际内容坐标
+uint3 DDGIGetProbeBaseTexelCoords(int probeIndex, int numProbeInteriorTexels)
+{
+    uint3 coords = DDGIGetProbeTexelCoordsOneByOne(probeIndex);
+
+    int numProbeTexels = numProbeInteriorTexels + 2;
+
+    return uint3(coords.x * numProbeTexels, coords.y * numProbeTexels, coords.z);
+}
+
 
 //计算探针的UV坐标。
 float3 DDGIGetProbeUV(int probeIndex, float2 octantCoordinates, int numProbeInteriorTexels)
