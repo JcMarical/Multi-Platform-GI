@@ -2,9 +2,10 @@ Shader "Custom/LitRayTracing"
 {
     Properties
     {
+        
         [Main(SurfaceGroup,_,off,off)] _SurfaceGroup("Surface Options",float) = 0
             //blending state
-            [Preset(SurfaceGroup, LWGUI_BlendModePtrset)] _Surface("Blend Mode Preset", Float) = 0.0
+            [Preset(SurfaceGroup, LWGUI_BlendModePreset)] _Surface("Blend Mode Preset", Float) = 0.0
             [SubEnum(SurfaceGroup,UnityEngine.Rendering.CullMode)] _Cull("Cull Mode", Float) = 2.0  //背面剔除模式
             [SubEnum(SurfaceGroup, UnityEngine.Rendering.BlendMode)] _SrcBlend("Src Blend", Float) = 1.0
             [SubEnum(SurfaceGroup, UnityEngine.Rendering.BlendMode)] _DstBlend("Dst Blend", Float) = 0.0

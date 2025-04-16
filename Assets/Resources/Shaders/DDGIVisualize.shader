@@ -33,7 +33,7 @@ Shader "Custom/DDGIVisualize"
             #include "Lib/DDGIFuncs.hlsl"
 
 
-            float4x4 _ddgiSphere_Object2World;
+            float4x4 _ddgiSphere_ObjectToWorld;
 
             struct Attributes
             {
@@ -53,7 +53,7 @@ Shader "Custom/DDGIVisualize"
             {
                 Varyings output = (Varyings)0;
 
-                float3 worldPos = mul((float3x3)_ddgiSphere_Object2World,input.positionOS);
+                float3 worldPos = mul((float3x3)_ddgiSphere_ObjectToWorld,input.positionOS);
 
                 //根据id获取探针的相对世界坐标，并加在世界坐标上
                 uint probeIndex = input.instanceID;
@@ -63,7 +63,7 @@ Shader "Custom/DDGIVisualize"
                 worldPos += probePosition;
 
                 output.positionCS = TransformWorldToHClip(worldPos);
-                output.normalWS = mul(input.normalOS,(float3x3)_ddgiSphere_Object2World);
+                output.normalWS = mul(input.normalOS,(float3x3)_ddgiSphere_ObjectToWorld);
 
                 output.probeIndex = probeIndex;
 
@@ -77,15 +77,23 @@ Shader "Custom/DDGIVisualize"
                 //探针状态
                 const int probeState =  DDGILoadProbeState(probeDataCoords);
 
-                //探针未激活，直接裁剪
-                //if(probeState == DDGI_PROBE_STATE_INACTIVE) clip(-1);
+                //探针不活跃，直接裁剪
+                if(probeState == DDGI_PROBE_STATE_INACTIVE) clip(-1);
 
+                
                 #ifdef DDGI_DEBUG_IRRADIANCE
-		            float4 result   = float4(1.0f,0,0,0);
+                    float3 uv       = DDGIGetProbeUV(input.probeIndex, SafeNormalize(input.normalWS), PROBE_IRRADIANCE_TEXELS);
+		            float3 radiance = SAMPLE_TEXTURE2D_ARRAY_LOD(_ProbeIrradianceHistory, sampler_LinearClamp, uv.xy, uv.z, 0).rgb;
+		            radiance        = pow(radiance, 2.5f);
+		            float4 result   = float4(radiance, 1.0f);
                 #elif DDGI_DEBUG_DISTANCE
-		            float4 result   = float4(0,1.0f,0,0);
+                    float3 uv       = DDGIGetProbeUV(input.probeIndex, SafeNormalize(input.normalWS), PROBE_DISTANCE_TEXELS);
+		            float distance  = SAMPLE_TEXTURE2D_ARRAY_LOD(_ProbeDistanceHistory, sampler_LinearClamp, uv.xy, uv.z, 0).r;
+		            float3 color    = distance.xxx / (Max(_ProbeSize) * 3);
+		            float4 result   = float4(color, 1.0f);
                 #elif DDGI_DEBUG_OFFSET
-		            float4 result   = float4(1.0f,1.0f,0,0);
+                    float3 offset   = LOAD_TEXTURE2D_ARRAY_LOD(_ProbeData, probeDataCoords.xy, probeDataCoords.z, 0).xyz;
+                    float4 result   = float4(abs(offset), 1);
                 #else
                     //或许需要更多测试模式？
                     float4 result = float4(0,0,1,0);
@@ -93,7 +101,7 @@ Shader "Custom/DDGIVisualize"
 
 
                 //return result;
-                return  float4(input.positionCS);
+                return  result;
             }
             
             ENDHLSL

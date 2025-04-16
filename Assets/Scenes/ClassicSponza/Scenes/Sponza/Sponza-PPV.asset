@@ -12,19 +12,19 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0b2db86121404754db890f4c8dfe81b2, type: 3}
   m_Name: Bloom
   m_EditorClassIdentifier: 
-  active: 0
+  active: 1
   skipIterations:
     m_OverrideState: 1
     m_Value: 1
   threshold:
     m_OverrideState: 1
-    m_Value: 0.5
+    m_Value: 0.75
   intensity:
     m_OverrideState: 1
-    m_Value: 2
+    m_Value: 1
   scatter:
     m_OverrideState: 1
-    m_Value: 0
+    m_Value: 0.7
   clamp:
     m_OverrideState: 1
     m_Value: 65472
@@ -59,7 +59,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 97c23e3b12dc18c42a140437e53d3951, type: 3}
   m_Name: Tonemapping
   m_EditorClassIdentifier: 
-  active: 0
+  active: 1
   mode:
     m_OverrideState: 1
     m_Value: 2
@@ -117,37 +117,37 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   active: 1
   enableDDGI:
-    m_OverrideState: 0
-    m_Value: 0
-  indirectIntensity:
-    m_OverrideState: 0
+    m_OverrideState: 1
     m_Value: 1
+  indirectIntensity:
+    m_OverrideState: 1
+    m_Value: 3
   normalBiasMultiplier:
-    m_OverrideState: 0
-    m_Value: 0.2
+    m_OverrideState: 1
+    m_Value: 0.1
   viewBiasMultiplier:
-    m_OverrideState: 0
-    m_Value: 0.8
+    m_OverrideState: 1
+    m_Value: 0.3
   probeRotationDegrees:
-    m_OverrideState: 0
+    m_OverrideState: 1
     m_Value: {x: 0, y: 0, z: 0}
   enableProbeRelocation:
-    m_OverrideState: 0
+    m_OverrideState: 1
     m_Value: 1
   probeMinFrontfaceDistance:
-    m_OverrideState: 0
+    m_OverrideState: 1
     m_Value: 0.3
   enableProbeClassification:
-    m_OverrideState: 0
+    m_OverrideState: 1
     m_Value: 1
   probeFixedRayBackfaceThreshold:
-    m_OverrideState: 0
+    m_OverrideState: 1
     m_Value: 0.25
   enableProbeVariability:
     m_OverrideState: 0
     m_Value: 0
   probeVariabilityThreshold:
-    m_OverrideState: 0
+    m_OverrideState: 1
     m_Value: 0.025
   useCustomBounds:
     m_OverrideState: 1
@@ -162,8 +162,8 @@ MonoBehaviour:
     m_OverrideState: 1
     m_Value: 22
   raysPerProbe:
-    m_OverrideState: 0
-    m_Value: 144
+    m_OverrideState: 1
+    m_Value: 256
   debugProbe:
     m_OverrideState: 1
     m_Value: 1
@@ -172,10 +172,10 @@ MonoBehaviour:
     m_Value: 0
   probeRadius:
     m_OverrideState: 1
-    m_Value: 5.5
+    m_Value: 11
   debugIndirect:
     m_OverrideState: 0
     m_Value: 0
   indirectDebugMode:
-    m_OverrideState: 0
-    m_Value: 0
+    m_OverrideState: 1
+    m_Value: 1

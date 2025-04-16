@@ -565,6 +565,7 @@ public class DDGIFeature : ScriptableRendererFeature
                 }
             }
             
+            
             // 更新 Irradiance
             // 主要计算Irradiance更新相关的 Compute Shader
             using (new ProfilingScope(cmd, new ProfilingSampler("DDGI Update Irradiance Pass")))
@@ -1344,6 +1345,8 @@ public class DDGIFeature : ScriptableRendererFeature
             if (ddgiOverride == null) return;
             
             
+            
+            
             if (!ddgiOverride.debugProbe.value) return;
 
             //获取命令缓冲区
@@ -1465,7 +1468,7 @@ public class DDGIFeature : ScriptableRendererFeature
         //检测系统是否支持光线追踪
         mIsRayTracingSupported = SystemInfo.supportsRayTracing;
 
-        //if (!mIsRayTracingSupported) return;
+        if (!mIsRayTracingSupported) return;
 
         //如果尚未初始化就创建初始化过程
         mDDGIPass ??= new DDGIPass();
@@ -1488,7 +1491,7 @@ public class DDGIFeature : ScriptableRendererFeature
         //跳过预览摄像机
         if (renderingData.cameraData.isPreviewCamera) return;
 
-        //if (!mIsRayTracingSupported) return;
+        if (!mIsRayTracingSupported) return;
 
         //将这两个pass加入渲染队列
           renderer.EnqueuePass(mDDGIPass);

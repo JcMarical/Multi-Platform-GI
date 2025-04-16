@@ -21,7 +21,7 @@ Material:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_Name: Curtain_Layered_Green
-  m_Shader: {fileID: 4800000, guid: eb1e0b9d32023b44fbd450158be7000a, type: 3}
+  m_Shader: {fileID: 4800000, guid: 3385bc11a97f4e87856044f8a5cb36bd, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
@@ -548,6 +548,7 @@ Material:
     - _OpacityAsDensity2: 0
     - _OpacityAsDensity3: 0
     - _OpaqueCullMode: 2
+    - _PBRGroup: 0
     - _PPDLodThreshold: 5
     - _PPDMaxSamples: 15
     - _PPDMinSamples: 5
@@ -605,6 +606,7 @@ Material:
     - _SubsurfaceMask3: 1
     - _SupportDecals: 1
     - _Surface: 0
+    - _SurfaceGroup: 0
     - _SurfaceType: 0
     - _TexWorldScale: 1
     - _TexWorldScale0: 1

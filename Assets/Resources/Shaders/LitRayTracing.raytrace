@@ -1,52 +1,43 @@
-RWTexture2D<float4> _OutputTarget; //设置输出的纹理目标
+RWTexture2D<float4> _OutputTarget;
 
-#pragma max_recursion_depth 1      // 设置最大递归深度为1
+#pragma max_recursion_depth 1
 
 #include "Lib/Common/RayTracingCommon.hlsl"
 #include "Lib/LitRayTracingInput.hlsl"
 
-float _CameraFarDistance;    // 摄像机远裁面距离
+float _CameraFarDistance;
 //RaytracingAccelerationStructure _AccelerationStructure;
 
-
-//-------------------主要的光线生成着色器-----------------
 [shader("raygeneration")]
 void SimpleColorRayGen()
 {
-    //获取当前像素的坐标和屏幕尺寸 
-    uint2 dispatchIdx = DispatchRaysIndex().xy;    //像素坐标
-    uint2 dispatchDim = DispatchRaysDimensions().xy; //屏幕长度   
-
-    //清除目标像素
-    _OutputTarget[dispatchIdx] = 0.0f;
+    // 获取当前像素的坐标和屏幕尺寸
+    uint2 dispatchIdx = DispatchRaysIndex().xy;      //像素坐标
+    uint2 dispatchDim = DispatchRaysDimensions().xy; //屏幕长宽
     
-    // 生成目标射线
-    float3 origin;
-    float3 direction;
+    // 清除目标像素
+    _OutputTarget[dispatchIdx] = 0.0f; // Clear
+    
+    // 生成相机射线
+    float3 origin; float3 direction;
     GenerateCameraRay(origin, direction);
-
-
-    // 光线描述符---生成光线
+    
+    //
     RayDesc rayDescriptor;
-    rayDescriptor.Origin     = origin;
-    rayDescriptor.Direction  = direction;
-    rayDescriptor.TMin       = 1e-5f;                 //射线最小距离
-    rayDescriptor.TMax       = _CameraFarDistance;    //射线最远距离。摄像机远截面
+    rayDescriptor.Origin    = origin;
+    rayDescriptor.Direction = direction;
+    rayDescriptor.TMin      = 1e-5f;              //射线最小距离
+    rayDescriptor.TMax      = _CameraFarDistance; //射线最远距离，摄像机远裁面
     
-    // 光线负载 
     RayPayload rayIntersection;
-    rayIntersection.remainingDepth   = 1;
-    rayIntersection.color            = 1e-5f;
+    rayIntersection.remainingDepth  = 1;
+    rayIntersection.color           = 0.0f;
     
-    //执行光线追踪
     TraceRay(_AccelerationStructure, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, 0xFF, 0, 1, 0, rayDescriptor, rayIntersection);
     
-    //写入纹理
     _OutputTarget[dispatchIdx] = rayIntersection.color;
-
 }
 
-//miss掉，设置为蓝色。
 [shader("miss")]
 void MissShader(inout RayPayload rayIntersection : SV_RayPayload)
 {
